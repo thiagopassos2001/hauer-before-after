@@ -1,0 +1,294 @@
+import pandas as pd
+import numpy as np
+import os
+
+# Work based on "Observational before-after studies in road safety" by Ezra Hauer (2002)
+# Functions
+def NaiveBeforeAfter(
+    df_treatment=None,
+    before_duration="treatment_before_duration",
+    after_duration="treatment_after_duration",
+    before_count="treatment_before_count",
+    after_count="treatment_after_count",
+    ):
+
+    """
+    Calculates the Naive BA by the 4-step expanded
+
+    Based on:
+    Chapter 7, "The Naive before-after study"
+    Chapter 10, "The variability of treatment effect"
+    """
+
+    # Copy dataset
+    df_treatment = df_treatment.copy()
+
+    # For composite entities
+    df_treatment["rdj"] = df_treatment[after_duration]/df_treatment[before_duration]
+    df_treatment["rdj_x_before_count"] = df_treatment["rdj"]*df_treatment[before_count]
+    df_treatment["rdj2_x_before_count"] = df_treatment["rdj"]*df_treatment["rdj_x_before_count"]
+
+    # Step 1
+    lambda_par = sum(df_treatment[after_count]) # estimated after with treatment
+
+    pi_par = sum(df_treatment["rdj_x_before_count"])# predict without treatment
+
+    # Step 2 
+    var_lambda_par = sum(df_treatment[after_count]) # assumed to be Poisson distributed
+    std_lambda_par = var_lambda_par**0.5
+
+    var_pi_par = sum(df_treatment["rdj2_x_before_count"]) # assumed to be Poisson distributed
+    std_pi_par = var_pi_par**0.5
+
+    # Step 3
+    delta_par = pi_par - lambda_par
+    delta_norm_par = delta_par/sum(df_treatment[after_duration])
+
+    teta_par = (lambda_par/pi_par) / (1+(var_pi_par/(pi_par**2)))
+
+    # Step 4
+    var_delta_par = var_lambda_par + var_pi_par
+    std_delta_par = var_delta_par**0.5
+
+    var_teta_par = (teta_par**2)*((var_lambda_par/(lambda_par**2))+(var_pi_par/(pi_par**2)))/((1+(var_pi_par/(pi_par**2)))**2)
+    std_teta_par = var_teta_par**0.5
+
+    # For single entities (variability of treatment effect)
+    df_treatment["lambda_par"] = df_treatment[after_count]
+    df_treatment["var_lambda_par"] = df_treatment[after_count]
+    df_treatment["pi_par"] = df_treatment["rdj_x_before_count"]
+    df_treatment["var_pi_par"] = df_treatment["rdj2_x_before_count"]
+
+    df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte = VariabilityTreatmentEffect(
+        df_treatment,
+        lambda_par="lambda_par",
+        var_lambda_par="var_lambda_par",
+        pi_par="pi_par",
+        var_pi_par="var_pi_par",
+        )
+
+    result = {
+        "lambda":lambda_par,
+        "var_lambda":var_lambda_par,
+        "std_lambda":std_lambda_par,
+        "pi":pi_par,
+        "var_pi":var_pi_par,
+        "std_pi":std_pi_par,
+        "delta":delta_par,
+        "delta_norm":delta_norm_par,
+        "var_delta":var_delta_par,
+        "std_delta":std_delta_par,
+        "teta":teta_par,
+        "var_teta":var_teta_par,
+        "std_teta":std_teta_par,
+        "s2_teta":s2_teta,
+        "avg_V":avg_V,
+        "var_teta_vte":var_teta_vte,
+        "std_teta_vte":std_teta_vte
+      }
+    result = pd.DataFrame(pd.Series(result,name="NAive BA"))
+
+    df_treatment = df_treatment[[
+        before_duration,after_duration,
+        before_count,after_count,
+        "rdj","rdj_x_before_count","rdj2_x_before_count",
+        "lambda_par","var_lambda_par","pi_par","var_pi_par",
+        "teta_par","var_teta_par","std_teta_par"
+        ]]
+
+    return df_treatment,result
+
+def ComparisonGroupBeforeAfter(
+    df_treatment=None,
+    df_comparison_group=None,
+    treatment_before_duration="treatment_before_duration",
+    treatment_after_duration="treatment_after_duration",
+    treatment_before_count="treatment_before_count",
+    treatment_after_count="treatment_after_count",
+    comparison_group_before_duration="comparison_group_before_duration",
+    comparison_group_after_duration="comparison_group_after_duration",
+    comparison_group_before_count="comparison_group_before_count",
+    comparison_group_after_count="comparison_group_after_count",
+    var_w_par=0.001):
+
+    # Copy dataset
+    df_treatment = df_treatment.copy()
+    df_comparison_group = df_comparison_group.copy()
+
+    df_treatment["rdj"] = df_treatment[treatment_after_duration]/df_treatment[treatment_before_duration]
+    df_treatment["rdj_x_before_count"] = df_treatment["rdj"]*df_treatment[treatment_before_count]
+    df_treatment["rdj2_x_before_count"] = df_treatment["rdj"]*df_treatment["rdj_x_before_count"]
+
+    df_comparison_group["rdj"] = df_comparison_group[comparison_group_after_duration]/df_comparison_group[comparison_group_before_duration]
+    df_comparison_group["rdj_x_before_count"] = df_comparison_group["rdj"]*df_comparison_group[comparison_group_before_count]
+    df_comparison_group["rdj2_x_before_count"] = df_comparison_group["rdj"]*df_comparison_group["rdj_x_before_count"]
+
+    L = sum(df_treatment[treatment_after_count]) # estimated after with treatment
+    K = sum(df_treatment[treatment_before_count])# predict without treatment (brefore, NaiveBA)
+    M = sum(df_comparison_group[comparison_group_before_count]) # estimated before G-C
+    N = sum(df_comparison_group[comparison_group_after_count]) # estimated after G-C
+    
+    # Step 1
+    lambda_par = L
+    rt = (N/M) / (1+(1/M))
+    pi_par = rt*K
+    
+    # Step 2
+    var_lambda_par = L
+    std_lambda_par = var_lambda_par**0.5
+
+    var_rt_par = (1/M) + (1/N) + var_w_par
+
+    var_pi_par = (pi_par**2)*((1/K)+var_rt_par)
+    std_pi_par = var_pi_par**0.5
+
+    # Step 3
+    delta_par = pi_par - lambda_par
+    delta_norm_par = delta_par/sum(df_treatment[treatment_after_duration])
+
+    teta_par = (lambda_par/pi_par) / (1+(var_pi_par/(pi_par**2)))
+
+    # Step 4
+    var_delta_par = var_lambda_par + var_pi_par
+    std_delta_par = var_delta_par**0.5
+
+    var_teta_par = (teta_par**2)*((var_lambda_par/(lambda_par**2))+(var_pi_par/(pi_par**2)))/((1+(var_pi_par/(pi_par**2)))**2)
+    std_teta_par = var_teta_par**0.5
+
+    # For single entities (variability of treatment effect)
+    df_treatment["lambda_par"] = df_treatment[treatment_after_count]
+    df_treatment["var_lambda_par"] = df_treatment[treatment_after_count]
+    df_treatment["pi_par"] = df_treatment["rdj_x_before_count"]
+    df_treatment["var_pi_par"] = df_treatment["rdj2_x_before_count"]
+
+    df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte = VariabilityTreatmentEffect(
+        df_treatment,
+        lambda_par="lambda_par",
+        var_lambda_par="var_lambda_par",
+        pi_par="pi_par",
+        var_pi_par="var_pi_par",
+        )
+
+    result = {
+        "K":K,
+        "L":L,
+        "M":M,
+        "N":N,
+        "rt":rt,
+        "var_rt/rt2":var_rt_par,
+        "var_w":var_w_par,
+        "lambda":lambda_par,
+        "var_lambda":var_lambda_par,
+        "std_lambda":std_lambda_par,
+        "pi":pi_par,
+        "var_pi":var_pi_par,
+        "std_pi":std_pi_par,
+        "delta":delta_par,
+        "delta_norm":delta_norm_par,
+        "var_delta":var_delta_par,
+        "std_delta":std_delta_par,
+        "teta":teta_par,
+        "var_teta":var_teta_par,
+        "std_teta":std_teta_par,
+        "s2_teta":s2_teta,
+        "avg_V":avg_V,
+        "var_teta_vte":var_teta_vte,
+        "std_teta_vte":std_teta_vte
+      }
+    
+    result = pd.DataFrame(pd.Series(result,name="CG BA"))
+
+    df_treatment = df_treatment[[
+        treatment_before_duration,
+        treatment_after_duration,
+        treatment_before_count,
+        treatment_after_count,
+        "rdj","rdj_x_before_count","rdj2_x_before_count",
+        "teta_par","var_teta_par","std_teta_par"]]
+
+    df_comparison_group = df_comparison_group[[
+        comparison_group_before_duration,
+        comparison_group_after_duration,
+        comparison_group_before_count,
+        comparison_group_after_count,
+        "rdj","rdj_x_before_count","rdj2_x_before_count"]]
+
+    return df_treatment,df_comparison_group,result
+
+def VariabilityTreatmentEffect(
+        df_treatment,
+        lambda_par="lambda_par",
+        var_lambda_par="var_lambda_par",
+        pi_par="pi_par",
+        var_pi_par="var_pi_par",
+):
+    """
+    Based on Chapter 10, "The variability of treatment effect"
+    """
+    # Copy dataset
+    df_treatment = df_treatment.copy()
+
+    # Teta by entity
+    df_treatment["teta_par"] = (df_treatment[lambda_par]/df_treatment[pi_par]) / (1+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))
+    df_treatment["var_teta_par"] = (df_treatment["teta_par"]**2)*((df_treatment[var_lambda_par]/(df_treatment[lambda_par]**2))+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))/((1+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))**2)
+    df_treatment["std_teta_par"] = df_treatment["var_teta_par"]**0.5
+
+    # Variability of Treatment Effect (vte)
+    s2_teta = np.var(df_treatment["teta_par"],ddof=1)
+    avg_V = np.mean(df_treatment["var_teta_par"])
+    var_teta_vte = s2_teta - avg_V
+    std_teta_vte = var_teta_vte**0.5
+
+    return df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte
+
+def GetExample(example_number):
+
+    if example_number=="Hauer, 2002, 7.2":
+        df = pd.DataFrame()
+        df['treatment_before_duration'] = [3,3,2,2,1]
+        df['treatment_after_duration'] = [1,1,1,1,1]
+        df['treatment_before_count'] = [31,23,7,8,5]
+        df['treatment_after_count'] = [7,4,1,5,7]
+
+        df_modified, result = NaiveBeforeAfter(df)
+
+        return df, df_modified,result
+
+    if example_number=="Coelho et al, 2008":
+        """
+        https://www.sinaldetransito.com.br/artigos/semaforos_x_acidentes.pdf
+        """
+        df = pd.DataFrame()
+        df["Semáforo"] = [470,472,473,476,477,478,479,480,481,482,483,484,485,486,487,488]
+        df["Período Antes"] = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+        df["Sinistros Antes"] = [20, 15, 1, 13, 8, 11, 5, 12, 8, 6, 3, 1, 10, 10, 11, 2]
+        df["Período Depois"] = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+        df["Sinistros Depois"] = [16, 8, 1, 11, 16, 33, 10, 10, 17, 15, 13, 7, 11, 6, 20, 3]
+
+        df_modified, result = NaiveBeforeAfter(df,'Período Antes','Período Depois','Sinistros Antes','Sinistros Depois')
+        
+        return df,df_modified,result
+    
+    if example_number=="Hauer, 2002, 9.3":
+        df_t= pd.DataFrame()
+        df_t['treatment_before_duration'] = [1]
+        df_t['treatment_after_duration'] = [1]
+        df_t['treatment_before_count'] = [173]
+        df_t['treatment_after_count'] = [144]
+
+        df_cg = pd.DataFrame()
+        df_cg['comparison_group_before_duration'] = [1]
+        df_cg['comparison_group_after_duration'] = [1]
+        df_cg['comparison_group_before_count'] = [897]
+        df_cg['comparison_group_after_count'] = [870]
+
+        df_t_modified, df_cg_modified, result = ComparisonGroupBeforeAfter(df_t,df_cg,var_w_par=0.0055)
+        
+        return df_t, df_cg, df_t_modified, df_cg_modified, result
+
+if __name__=="__main__":
+
+    result = GetExample("Hauer, 2002, 9.3")
+
+    print(result[2])
+    
