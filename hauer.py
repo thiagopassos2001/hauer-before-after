@@ -231,64 +231,17 @@ def VariabilityTreatmentEffect(
     # Teta by entity
     df_treatment["teta_par"] = (df_treatment[lambda_par]/df_treatment[pi_par]) / (1+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))
     df_treatment["var_teta_par"] = (df_treatment["teta_par"]**2)*((df_treatment[var_lambda_par]/(df_treatment[lambda_par]**2))+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))/((1+(df_treatment[var_pi_par]/(df_treatment[pi_par]**2)))**2)
-    df_treatment["std_teta_par"] = df_treatment["var_teta_par"]**0.5
+    df_treatment["std_teta_par"] = np.sqrt(df_treatment["var_teta_par"])
 
     # Variability of Treatment Effect (vte)
     s2_teta = np.var(df_treatment["teta_par"],ddof=1)
     avg_V = np.mean(df_treatment["var_teta_par"])
     var_teta_vte = s2_teta - avg_V
-    std_teta_vte = var_teta_vte**0.5
+    print(var_teta_vte)
+    std_teta_vte = np.sqrt(var_teta_vte)
 
     return df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte
 
-def GetExample(example_number):
-
-    if example_number=="Hauer, 2002, 7.2":
-        df = pd.DataFrame()
-        df['treatment_before_duration'] = [3,3,2,2,1]
-        df['treatment_after_duration'] = [1,1,1,1,1]
-        df['treatment_before_count'] = [31,23,7,8,5]
-        df['treatment_after_count'] = [7,4,1,5,7]
-
-        df_modified, result = NaiveBeforeAfter(df)
-
-        return df, df_modified,result
-
-    if example_number=="Coelho et al, 2008":
-        """
-        https://www.sinaldetransito.com.br/artigos/semaforos_x_acidentes.pdf
-        """
-        df = pd.DataFrame()
-        df["Semáforo"] = [470,472,473,476,477,478,479,480,481,482,483,484,485,486,487,488]
-        df["Período Antes"] = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-        df["Sinistros Antes"] = [20, 15, 1, 13, 8, 11, 5, 12, 8, 6, 3, 1, 10, 10, 11, 2]
-        df["Período Depois"] = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-        df["Sinistros Depois"] = [16, 8, 1, 11, 16, 33, 10, 10, 17, 15, 13, 7, 11, 6, 20, 3]
-
-        df_modified, result = NaiveBeforeAfter(df,'Período Antes','Período Depois','Sinistros Antes','Sinistros Depois')
-        
-        return df,df_modified,result
-    
-    if example_number=="Hauer, 2002, 9.3":
-        df_t= pd.DataFrame()
-        df_t['treatment_before_duration'] = [1]
-        df_t['treatment_after_duration'] = [1]
-        df_t['treatment_before_count'] = [173]
-        df_t['treatment_after_count'] = [144]
-
-        df_cg = pd.DataFrame()
-        df_cg['comparison_group_before_duration'] = [1]
-        df_cg['comparison_group_after_duration'] = [1]
-        df_cg['comparison_group_before_count'] = [897]
-        df_cg['comparison_group_after_count'] = [870]
-
-        df_t_modified, df_cg_modified, result = ComparisonGroupBeforeAfter(df_t,df_cg,var_w_par=0.0055)
-        
-        return df_t, df_cg, df_t_modified, df_cg_modified, result
-
 if __name__=="__main__":
-
-    result = GetExample("Hauer, 2002, 9.3")
-
-    print(result[2])
+    print("Ok")
     
