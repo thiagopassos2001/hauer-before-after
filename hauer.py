@@ -237,7 +237,6 @@ def VariabilityTreatmentEffect(
     s2_teta = np.var(df_treatment["teta_par"],ddof=1)
     avg_V = np.mean(df_treatment["var_teta_par"])
     var_teta_vte = s2_teta - avg_V
-    print(var_teta_vte)
     std_teta_vte = np.sqrt(var_teta_vte)
 
     return df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte
