@@ -241,6 +241,114 @@ def VariabilityTreatmentEffect(
 
     return df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte
 
+def EmpiricalBayesMethod(
+    df_treatment,
+    SPF_func,
+    b,
+    par_list,
+    start_year,
+    end_year,
+    before_duration="treatment_before_duration",
+    after_duration="treatment_after_duration",
+    before_count="treatment_before_count",
+    after_count="treatment_after_count",
+    sep="@"):
+
+    """
+    The "df_treatment should contain the combination of the "par_list" and range years columns with "sep" as a separator.
+    Ex.: "AADV@2025"
+    """
+
+    df_treatment = df_treatment.copy()
+
+    # MEB
+    accident_before_SPF_cols= []
+    accident_after_SPF_cols = []
+    
+    for y in range(start_year,end_year+1):
+        df_treatment[f"accident_func_SPF"+sep+str(y)] = df_treatment.apply(lambda row:SPF_func([y]+[row[par+sep+str(y)] for par in par_list]),axis=1)
+
+        df_treatment["accident_before_SPF"+sep+str(y)] = df_treatment[before_duration+sep+str(y)] * df_treatment[f"accident_func_SPF"+sep+str(y)]
+        accident_before_SPF_cols.append("accident_before_SPF"+sep+str(y))
+
+        df_treatment["accident_after_SPF"+sep+str(y)] = df_treatment[after_duration+sep+str(y)] * df_treatment[f"accident_func_SPF"+sep+str(y)]
+        accident_after_SPF_cols.append("accident_after_SPF"+sep+str(y))
+
+    df_treatment["Ekb SPF"] = df_treatment[accident_before_SPF_cols].sum(axis=1)
+    df_treatment["Eka SPF"] = df_treatment[accident_after_SPF_cols].sum(axis=1)
+    
+    df_treatment["VAR_Ek SPF"] = (df_treatment["Ekb SPF"]**2)/b
+    
+    df_treatment["alpha"] = 1/(1+(df_treatment["VAR_Ek SPF"]/df_treatment["Ekb SPF"]))
+    
+    df_treatment["k_par"] = (df_treatment["alpha"]*df_treatment["Ekb SPF"])+((1-df_treatment["alpha"])*df_treatment[before_count])
+    df_treatment["var_k_par"] = (1-df_treatment["alpha"])*df_treatment["k_par"]
+    
+    df_treatment["rC"] = df_treatment["Eka SPF"]/df_treatment["Ekb SPF"]
+    df_treatment["pi_par"] = df_treatment["rC"]*df_treatment["k_par"]
+    df_treatment["var_pi_par"] = (df_treatment["rC"]**2)*df_treatment["var_k_par"]
+
+    # 4-steps
+    # Step 1
+    lambda_par = sum(df_treatment[after_count]) # estimated after with treatment
+    
+    pi_par = sum(df_treatment["pi_par"])# predict without treatment
+    
+    # Step 2 
+    var_lambda_par = sum(df_treatment[after_count]) # assumed to be Poisson distributed
+    std_lambda_par = var_lambda_par**0.5
+    
+    var_pi_par = sum(df_treatment["var_pi_par"])
+    std_pi_par = var_pi_par**0.5
+    
+    # Step 3
+    delta_par = pi_par - lambda_par
+    delta_norm_par = delta_par/sum(df_treatment[after_duration])
+    
+    teta_par = (lambda_par/pi_par) / (1+(var_pi_par/(pi_par**2)))
+    
+    # Step 4
+    var_delta_par = var_lambda_par + var_pi_par
+    std_delta_par = var_delta_par**0.5
+    
+    var_teta_par = (teta_par**2)*((var_lambda_par/(lambda_par**2))+(var_pi_par/(pi_par**2)))/((1+(var_pi_par/(pi_par**2)))**2)
+    std_teta_par = var_teta_par**0.5
+    
+    # For single entities (variability of treatment effect)
+    df_treatment["lambda_par"] = df_treatment[after_count]
+    df_treatment["var_lambda_par"] = df_treatment[after_count]
+    
+    df_treatment,s2_teta,avg_V,var_teta_vte,std_teta_vte = VariabilityTreatmentEffect(
+        df_treatment,
+        lambda_par="lambda_par",
+        var_lambda_par="var_lambda_par",
+        pi_par="pi_par",
+        var_pi_par="var_pi_par",
+        )
+    
+    result = {
+        "lambda":lambda_par,
+        "var_lambda":var_lambda_par,
+        "std_lambda":std_lambda_par,
+        "pi":pi_par,
+        "var_pi":var_pi_par,
+        "std_pi":std_pi_par,
+        "delta":delta_par,
+        "delta_norm":delta_norm_par,
+        "var_delta":var_delta_par,
+        "std_delta":std_delta_par,
+        "teta":teta_par,
+        "var_teta":var_teta_par,
+        "std_teta":std_teta_par,
+        "s2_teta":s2_teta,
+        "avg_V":avg_V,
+        "var_teta_vte":var_teta_vte,
+        "std_teta_vte":std_teta_vte
+      }
+    result = pd.DataFrame(pd.Series(result,name="EB"))
+    
+    return df_treatment,result
+
 if __name__=="__main__":
     print("Ok")
     
